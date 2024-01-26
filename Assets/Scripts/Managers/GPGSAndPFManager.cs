@@ -7,6 +7,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.Purchasing;
 using UnityEngine.Purchasing.Extension;
 
@@ -17,7 +18,11 @@ public class GPGSAndPFManager : MonoBehaviour, IDetailedStoreListener
 
     //재화 정보 View 업데이트 옵저버 용도 //Managers.PF.crystalChange += OnMethod();
     public delegate void OnCrystalChange(int currentCrystal);
-    public OnCrystalChange crystalChange;   
+    public OnCrystalChange crystalChange;
+
+    //뉴스 정보 View 업데이트 옵저버 용도 //Managers.PF.onNews += OnMethod();
+    public delegate void OnNews(GetTitleNewsResult result);
+    public OnNews onNews;
 
     public bool IsInitialized
     {
@@ -36,6 +41,15 @@ public class GPGSAndPFManager : MonoBehaviour, IDetailedStoreListener
 
     int crystal;
     public int GetCrystal() { return crystal; }
+
+    [System.Serializable]
+    public class ItemSetter
+    {
+        public string itemId;
+        public int maxBuyCount;
+    }
+
+    public List<ItemSetter> itemSetter;
 
     public IEnumerator Start()
     {
@@ -276,6 +290,56 @@ public class GPGSAndPFManager : MonoBehaviour, IDetailedStoreListener
         Debug.Log($"OnPurchaseFailed :: failureReason :  {failureReason.ToString()}");
     }
 
+    public void Purchase(string productId)
+    {
+        try
+        {
+            Product product = m_StoreController.products.WithID(productId); //상품 정의
+
+            if (product != null && product.availableToPurchase) //상품이 존재하면서 구매 가능하면
+            {
+                m_StoreController.InitiatePurchase(product); //구매가 가능하면 진행
+            }
+            else //상품이 존재하지 않거나 구매 불가능하면
+            {
+                //errorText.text = ("상품이 없거나 현재 구매가 불가능합니다");
+                Debug.Log("상품이 없거나 현재 구매가 불가능합니다");
+            }
+        }
+        catch (Exception e)
+        {
+            //errorText.text = e.Message;
+            Debug.Log($"{e.Message}");
+        }
+    }
+
+    public void PlayfabPurchase(CatalogItem item, UnityAction buyCallBack, UnityAction errorCallback)
+    {
+        var request = new PurchaseItemRequest()
+        {
+            CatalogVersion = item.CatalogVersion,
+            StoreId = "CrystalStore",
+            ItemId = item.ItemId,
+            VirtualCurrency = "CD",
+            Price = Convert.ToInt32(item.VirtualCurrencyPrices["CD"]),
+        };
+
+        PlayFabClientAPI.PurchaseItem(request
+        , (result) =>
+        {
+            //  Debug.Log("아이템 구매 완료");
+            RefreshInventory();
+            buyCallBack?.Invoke();
+        },
+        (error) =>
+        {
+            // Debug.Log("아이템 구매 실패");
+            Debug.LogError("구매실패::" + error.ErrorMessage);
+            errorCallback?.Invoke();
+        });
+    }
+
+
     public PurchaseProcessingResult ProcessPurchase(PurchaseEventArgs purchaseEvent)
     {
         try
@@ -367,9 +431,64 @@ public class GPGSAndPFManager : MonoBehaviour, IDetailedStoreListener
         );
     }
 
+    /* 플레이팹의 인벤토리의 저장된 정보를 불러온 데이터로 게임내 인벤토리에 반영 */
     public void RecoveryItem()
     {
+        for (int i = 0; i < itemSetter.Count; i++)
+        {
+            var targetInventory = playerInventory.Find(x => x.ItemId == itemSetter[i].itemId);
+            if (targetInventory != null)
+            {
+                //engine.Param.SetParameter(string.Format("Item[{0}].SavedAmount", itemSetter[i].utageId), targetInventory.RemainingUses);
+            }
+            else
+            {
+                //engine.Param.SetParameter(string.Format("Item[{0}].SavedAmount", itemSetter[i].utageId), 0);
+            }
+        }
+    }
 
+    /* 플레이어 인벤토리에 해당 아이템의 존재 여부 */
+    public bool CheckInventory(string label) 
+    {
+        for(int i = 0; i < playerInventory.Count; i++)
+        {
+            if (playerInventory[i].ItemId == label)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* 아이템 개수  정리 */
+    public void ProcessIngameItem()
+    {
+        /*
+         * 모든 아이템 종류를 불러와
+         * 소지중인 아이템인지 확인후
+         * 소지중 이라면 소지 량을 0과 99999(최대수량 사이의 개수로 보정)
+         */
+        /*
+            //현재 저장된 아이템의 값에 사용한 양의 정보를 불러와서 반영
+            AdvParamStructTbl itemStruct = engine.Param.StructTbl["Item{}"];
+            foreach (var structTarget in itemStruct.Tbl)
+            {
+                if (structTarget.Value.Tbl["SavedAmount"].IntValue > -1)
+                {
+                    engine.Param.SetParameter(string.Format("Item[{0}].Amount", structTarget.Key), Mathf.Clamp( structTarget.Value.Tbl["SavedAmount"].IntValue - structTarget.Value.Tbl["UsedAmount"].IntValue,0,9999999));
+                }
+            }
+         */
+    }
+
+    public void RequestNews()
+    {
+        PlayFabClientAPI.GetTitleNews(new GetTitleNewsRequest(), result =>
+        {
+            onNews?.Invoke(result);
+            // Process news using result.News
+        }, error => Debug.LogError(error.GenerateErrorReport()));
     }
 
 }
